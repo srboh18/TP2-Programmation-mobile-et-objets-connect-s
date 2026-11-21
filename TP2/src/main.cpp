@@ -41,6 +41,7 @@ const char *TIME_ZONE = "EST5EDT,M3.2.0/2,M11.1.0/2";
 
 const unsigned long DEBOUNCE_DELAY = 50;
 const unsigned long DUREE_APPUI_LONG = 3000;
+const unsigned long DUREE_SERVO = 1000;
 
 // ==========================================
 // OBJETS
@@ -362,6 +363,48 @@ bool confirmerCode(const int code[4])
 
     return true;
 }
+// ==========================================
+// FERMETURE DU COFFRE
+// ==========================================
+
+void fermerCoffre()
+{
+    // Vérifier que le coffre est ouvert
+    // et qu'un code a été programmé
+
+    if (!codeProgramme || !coffreOuvert)
+    {
+        return;
+    }
+
+    Serial.println("==============================");
+    Serial.println("FERMETURE DU COFFRE");
+    Serial.println("==============================");
+
+    // Faire tourner le servo à 180 degrés
+    servo.attach(SERVO_PIN, 500, 2400);
+    servo.write(180);
+
+    delay(DUREE_SERVO);
+
+    servo.detach();
+
+    // Matrice rouge
+    afficherCouleur(255, 0, 0);
+
+    // Effacer l'afficheur
+    afficheur.clear();
+
+    // Mettre à jour l'état du coffre
+    coffreOuvert = false;
+
+    Serial.println("Coffre ferme !");
+    Serial.println("Servo : 180 degres");
+    Serial.println("Matrice : rouge");
+    Serial.println("Afficheur : vide");
+
+    Serial.println("==============================");
+}
 
 // ==========================================
 // PROGRAMMATION COMPLÈTE DU CODE
@@ -426,9 +469,53 @@ void programmerNouveauCode()
 }
 
 // ==========================================
+// GESTION DU BOUTON A
+// ==========================================
+void gererBoutonA()
+{
+    bool lecture = digitalRead(BUTTON_A);
+
+    if (lecture != dernierEtatA)
+    {
+        dernierChangementA = millis();
+    }
+
+    if (millis() - dernierChangementA >= DEBOUNCE_DELAY)
+    {
+        if (lecture != etatStableA)
+        {
+            etatStableA = lecture;
+
+            // Bouton A enfoncé
+            if (etatStableA == LOW)
+            {
+                Serial.println("Bouton A enfonce");
+
+                // Fermer uniquement si un code existe
+                // et si le coffre est ouvert
+
+                if (codeProgramme && coffreOuvert)
+                {
+                    fermerCoffre();
+                }
+                else if (!codeProgramme)
+                {
+                    Serial.println("Aucun code programme !");
+                    Serial.println("Impossible de fermer le coffre.");
+                }
+                else
+                {
+                    Serial.println("Le coffre est deja ferme.");
+                }
+            }
+        }
+    }
+
+    dernierEtatA = lecture;
+}
+// ==========================================
 // GESTION DU BOUTON B
 // ==========================================
-
 void gererBoutonB()
 {
     bool lecture = digitalRead(BUTTON_B);
