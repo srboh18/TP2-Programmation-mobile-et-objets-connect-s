@@ -1,32 +1,9 @@
-
-#include <Arduino.h>
+#include "main.h"
+#include "secret.h"
 #include <WiFi.h>
 #include <time.h>
-#include <Adafruit_NeoPixel.h>
-#include <ESP32Servo.h>
-#include <TM1637Display.h>
-
-// ==========================================
-// CONFIGURATION DES BROCHES
-// ==========================================
-
-#define MATRIX_PIN 13
-#define NUM_LEDS 64
-
-#define SERVO_PIN 25
-
-#define BUTTON_A 16
-#define BUTTON_B 17
-
-#define CLK_PIN 18
-#define DIO_PIN 19
-
-// ==========================================
-// CONFIGURATION WIFI
-// ==========================================
-
-const char *WIFI_SSID = "iPhone de sami";
-const char *WIFI_PASSWORD = "sami2222";
+#include <Firebase_ESP_Client.h>
+#include <addons/TokenHelper.h>
 
 // ==========================================
 // CONFIGURATION NTP
@@ -35,63 +12,101 @@ const char *WIFI_PASSWORD = "sami2222";
 const char *NTP_SERVER = "pool.ntp.org";
 const char *TIME_ZONE = "EST5EDT,M3.2.0/2,M11.1.0/2";
 
-// ==========================================
-// CONFIGURATION TEMPS
-// ==========================================
-
 const unsigned long DEBOUNCE_DELAY = 50;
 const unsigned long DUREE_APPUI_LONG = 3000;
 const unsigned long DUREE_SERVO = 1000;
+const unsigned long DUREE_CLIGNOTEMENT = 300;
 
 // ==========================================
 // OBJETS
 // ==========================================
 
-Adafruit_NeoPixel matrix(
-    NUM_LEDS,
-    MATRIX_PIN,
-    NEO_GRB + NEO_KHZ800);
-
+Adafruit_NeoPixel matrix(NUM_LEDS, MATRIX_PIN, NEO_GRB + NEO_KHZ800);
 Servo servo;
-
 TM1637Display afficheur(CLK_PIN, DIO_PIN);
 
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+bool firebaseInitialise = false;
+bool firebaseInscriptionReussie = false;
+
 // ==========================================
-// VARIABLES
+// ÉTATS DU COFFRE
 // ==========================================
 
-// État du coffre
 bool codeProgramme = false;
 bool coffreOuvert = true;
-
-// Code enregistré
 int codeEnregistre[4] = {0, 0, 0, 0};
 
 // ==========================================
-// DÉTECTION BOUTON A
+// MACHINE À ÉTATS
 // ==========================================
 
-bool dernierEtatA = HIGH;
+EtatSysteme etatSysteme = ATTENTE;
+TypeSaisie typeSaisie = AUCUNE_SAISIE;
+ActionClignotement actionApresClignotement = AUCUNE_ACTION;
+
+// ==========================================
+// VARIABLES DE SAISIE
+// ==========================================
+
+int codeTemporaire[4] = {0, 0, 0, 0};
+int codeConfirmation[4] = {0, 0, 0, 0};
+int codeSaisi[4] = {0, 0, 0, 0};
+int positionChiffre = 0;
+int chiffreActuel = 0;
+
+// ==========================================
+// VARIABLES ANTI-REBOND
+// ==========================================
+
+bool lectureA = HIGH;
 bool etatStableA = HIGH;
-
 unsigned long dernierChangementA = 0;
+bool appuiA = false;
 
-// ==========================================
-// DÉTECTION BOUTON B
-// ==========================================
-
-bool dernierEtatB = HIGH;
+bool lectureB = HIGH;
 bool etatStableB = HIGH;
-
 unsigned long dernierChangementB = 0;
-
-unsigned long tempsDebutAppui = 0;
-
+bool appuiB = false;
+unsigned long tempsDebutAppuiB = 0;
 bool appuiLongDeclenche = false;
 
 // ==========================================
-// MATRICE
+// VARIABLES CLIGNOTEMENT
 // ==========================================
+
+uint8_t couleurClignotementR = 0;
+uint8_t couleurClignotementG = 0;
+uint8_t couleurClignotementB = 0;
+int nombreTransitions = 0;
+unsigned long dernierClignotement = 0;
+bool couleurAllumee = false;
+
+// ==========================================
+// VARIABLES SERVO
+// ==========================================
+
+bool servoEnMouvement = false;
+unsigned long debutMouvementServo = 0;
+
+// ==========================================
+// VARIABLES WIFI ET NTP
+// ==========================================
+
+bool wifiConnecte = false;
+bool heureSynchronisee = false;
+unsigned long dernierTestWiFi = 0;
+unsigned long dernierTestHeure = 0;
+
+// ==========================================
+// VARIABLES FIRESTORE
+// ==========================================
+
+// Compteur pour garantir un identifiant différent à chaque document Firestore.
+unsigned long numeroEvenement = 0;
 
 void afficherCouleur(uint8_t r, uint8_t g, uint8_t b)
 {
@@ -103,484 +118,561 @@ void afficherCouleur(uint8_t r, uint8_t g, uint8_t b)
     matrix.show();
 }
 
-// ==========================================
-// CLIGNOTEMENT DE LA MATRICE
-// ==========================================
-
-void clignoterCouleur(uint8_t r, uint8_t g, uint8_t b)
-{
-    for (int i = 0; i < 3; i++)
-    {
-        afficherCouleur(r, g, b);
-        delay(300);
-
-        afficherCouleur(0, 0, 0);
-        delay(300);
-    }
-}
-
-// ==========================================
-// CONNEXION WIFI
-// ==========================================
-
-void connecterWiFi()
-{
-    Serial.println("Connexion au Wi-Fi...");
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.print(".");
-        delay(500);
-    }
-
-    Serial.println();
-    Serial.println("Wi-Fi connecte !");
-
-    Serial.print("Adresse IP : ");
-    Serial.println(WiFi.localIP());
-}
-
-// ==========================================
-// SYNCHRONISATION DE L'HEURE
-// ==========================================
-
-void synchroniserHeure()
-{
-    Serial.println("Synchronisation NTP...");
-
-    configTzTime(TIME_ZONE, NTP_SERVER);
-
-    struct tm timeInfo;
-
-    if (getLocalTime(&timeInfo, 10000))
-    {
-        Serial.println("Heure synchronisee !");
-
-        Serial.print("Date et heure : ");
-        Serial.println(&timeInfo, "%Y-%m-%d %H:%M:%S");
-    }
-    else
-    {
-        Serial.println("Erreur de synchronisation NTP");
-    }
-}
-
-// ==========================================
-// ATTENDRE UN APPUI COMPLET
-// ==========================================
-
-
-//***************** MÉMO ************************
-// HIGH  = Relaché ///  LOW = Enfoncé ***********
-//***********************************************
-void attendreRelachement(int bouton)
-{
-    while (digitalRead(bouton) == LOW)
-    {
-        delay(1);
-    }
-
-    delay(DEBOUNCE_DELAY);
-}
-
-void attendreAppui(int bouton)
-{
-
-    //  Boucle infini qui gère l'appui du boutton A 
-    // En résumé on attend que le boutton soit enfoncé 
-    while (true)
-    {
-        // Attendre que le bouton soit enfoncé
-        while (digitalRead(bouton) == HIGH)
-        {
-            delay(1);
-        }
-
-        // Vérifier l'anti-rebond
-        delay(DEBOUNCE_DELAY);
-
-        if (digitalRead(bouton) == LOW)
-        {
-            break;
-        }
-    }
-
-    // Attendre le relâchement
-    attendreRelachement(bouton);
-}
-
-// ==========================================
-// AFFICHER UN SEUL CHIFFRE
-// ==========================================
 void afficherUnChiffre(int chiffre, int position)
 {
-    // Modifier uniquement le digit sélectionné
     afficheur.showNumberDec(chiffre, false, 1, position);
 }
 
-// ==========================================
-// SAISIE DU PREMIER CODE
-// ==========================================
-
-void changerCode(int code[4])
+void effacerAfficheur()
 {
-    Serial.println("==============================");
-    Serial.println("PREMIERE SAISIE");
-    Serial.println("==============================");
-
-    // Attendre le relâchement du B ayant déclenché
-    // la programmation
-    attendreRelachement(BUTTON_B);
-
     afficheur.clear();
-    for (int i = 0; i < 4; i++)
-    {
-        int currentNumber = 0;
-
-        bool codeConfirmed = false;
-
-        // Afficher le premier chiffre
-        afficherUnChiffre(currentNumber, i);
-
-        while (!codeConfirmed)
-        {
-            // ==========================================
-            // BOUTON A : INCRÉMENTER LE CHIFFRE
-            // ==========================================
-
-            if (digitalRead(BUTTON_A) == LOW)
-            {
-                attendreAppui(BUTTON_A);
-
-                currentNumber = (currentNumber + 1) % 10;
-
-                afficherUnChiffre(currentNumber, i);
-
-                Serial.println("Chiffre modifie");
-            }
-
-            // ==========================================
-            // BOUTON B : CONFIRMER LE CHIFFRE
-            // ==========================================
-
-            if (digitalRead(BUTTON_B) == LOW)
-            {
-                attendreAppui(BUTTON_B);
-
-                code[i] = currentNumber;
-
-                codeConfirmed = true;
-
-                Serial.print("Position confirmee : ");
-                Serial.println(i + 1);
-            }
-        }
-    }
-
-    // Effacer l'afficheur après la première saisie
-    afficheur.clear();
-
-    Serial.println("Premiere saisie terminee");
 }
 
-// ==========================================
-// CONFIRMATION DU CODE
-// ==========================================
-
-bool confirmerCode(const int code[4])
+void connecterWiFi()
 {
-    int confirmedCode[4] = {0, 0, 0, 0};
-
-    Serial.println("==============================");
-    Serial.println("CONFIRMATION DU CODE");
-    Serial.println("==============================");
-
-    for (int i = 0; i < 4; i++)
-    {
-        int currentNumber = 0;
-
-        bool codeConfirmed = false;
-
-        afficherUnChiffre(currentNumber, i);
-
-        while (!codeConfirmed)
-        {
-            // ==========================================
-            // BOUTON A : INCRÉMENTER LE CHIFFRE
-            // ==========================================
-
-            if (digitalRead(BUTTON_A) == LOW)
-            {
-                attendreAppui(BUTTON_A);
-
-                currentNumber = (currentNumber + 1) % 10;
-
-                afficherUnChiffre(currentNumber, i);
-
-                Serial.println("Chiffre modifie");
-            }
-
-            // ==========================================
-            // BOUTON B : CONFIRMER LE CHIFFRE
-            // ==========================================
-
-            if (digitalRead(BUTTON_B) == LOW)
-            {
-                attendreAppui(BUTTON_B);
-
-                confirmedCode[i] = currentNumber;
-
-                codeConfirmed = true;
-
-                Serial.print("Position confirmee : ");
-                Serial.println(i + 1);
-            }
-        }
-    }
-
-    // Effacer l'afficheur
-    afficheur.clear();
-
-    Serial.println("Confirmation terminee");
-
-    // ==========================================
-    // COMPARAISON DES DEUX CODES
-    // ==========================================
-
-    for (int i = 0; i < 4; i++)
-    {
-        if (confirmedCode[i] != code[i])
-        {
-            Serial.println("Les codes sont differents !");
-            return false;
-        }
-    }
-
-    Serial.println("Les codes sont identiques !");
-
-    return true;
+    Serial.println("Demarrage de la connexion Wi-Fi...");
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
-// ==========================================
-// FERMETURE DU COFFRE
-// ==========================================
 
+void synchroniserHeure()
+{
+    Serial.println("Demande de synchronisation NTP...");
+    configTzTime(TIME_ZONE, NTP_SERVER);
+}
+
+// Initialise Firebase avec l'authentification anonyme vue dans l'exercice du cours.
+void initialiserFirebase()
+{
+    Serial.println("[Firebase] Initialisation");
+
+    config.api_key = API_KEY;
+    config.token_status_callback = tokenStatusCallback;
+
+    if (Firebase.signUp(&config, &auth, "", ""))
+    {
+        firebaseInscriptionReussie = true;
+        Serial.println("Connexion Firebase OK");
+    }
+    else
+    {
+        Serial.print("Erreur Firebase : ");
+        Serial.println(config.signer.signupError.message.c_str());
+    }
+
+    Firebase.begin(&config, &auth);
+    Firebase.reconnectWiFi(true);
+
+    firebaseInitialise = true;
+}
+
+// Enregistre un événement dans Firestore à l'aide de FirebaseJson et createDocument.
+void journaliserEvenement(const char *type)
+{
+    if (!firebaseInitialise || !firebaseInscriptionReussie ||
+        !Firebase.ready() || !heureSynchronisee)
+    {
+        Serial.println("Evenement non enregistre : Firebase ou heure indisponible.");
+        return;
+    }
+
+    time_t maintenant = time(nullptr);
+
+    if (maintenant < 100000)
+    {
+        Serial.println("Evenement non enregistre : heure invalide.");
+        return;
+    }
+
+    struct tm heureUTC;
+    gmtime_r(&maintenant, &heureUTC);
+
+    char horodatage[25];
+    strftime(horodatage, sizeof(horodatage), "%Y-%m-%dT%H:%M:%SZ", &heureUTC);
+
+    FirebaseJson document;
+    document.set("fields/type/stringValue", type);
+    document.set("fields/horodatage/timestampValue", horodatage);
+    document.set("fields/coffre/stringValue", ID_COFFRE);
+
+    // Un identifiant unique évite de remplacer un événement déjà enregistré.
+    numeroEvenement++;
+
+    String cheminDocument = "evenements/";
+    cheminDocument += String((unsigned long)maintenant);
+    cheminDocument += "_";
+    cheminDocument += String(numeroEvenement);
+
+    Serial.print("Envoi Firestore : ");
+    Serial.println(type);
+
+    if (Firebase.Firestore.createDocument(
+            &fbdo,
+            PROJECT_ID,
+            "",
+            cheminDocument.c_str(),
+            document.raw()))
+    {
+        Serial.println("Evenement ajoute a Firestore.");
+    }
+    else
+    {
+        Serial.print("Erreur Firestore : ");
+        Serial.println(fbdo.errorReason());
+    }
+}
+
+void gererWiFiEtHeure()
+{
+    if (!wifiConnecte && WiFi.status() == WL_CONNECTED)
+    {
+        wifiConnecte = true;
+
+        Serial.println("Wi-Fi connecte !");
+        Serial.print("Adresse IP : ");
+        Serial.println(WiFi.localIP());
+
+        synchroniserHeure();
+        initialiserFirebase();
+    }
+
+    if (wifiConnecte && !heureSynchronisee)
+    {
+        if (millis() - dernierTestHeure >= 1000)
+        {
+            dernierTestHeure = millis();
+
+            struct tm timeInfo;
+            if (getLocalTime(&timeInfo, 0))
+            {
+                heureSynchronisee = true;
+                Serial.println("Heure synchronisee !");
+                Serial.print("Date et heure : ");
+                Serial.println(&timeInfo, "%Y-%m-%d %H:%M:%S");
+            }
+        }
+    }
+
+    if (!wifiConnecte && millis() - dernierTestWiFi >= 5000)
+    {
+        dernierTestWiFi = millis();
+        Serial.println("En attente du Wi-Fi...");
+    }
+}
+
+// Démarre la saisie du code ou passe à l'étape de confirmation.
+void demarrerSaisie(TypeSaisie type)
+{
+    // Autorise le passage de la première saisie à la confirmation sans quitter SAISIE_CODE.
+    bool transitionConfirmation =
+        etatSysteme == SAISIE_CODE &&
+        typeSaisie == PROGRAMMATION_PREMIER_CODE &&
+        type == PROGRAMMATION_CONFIRMATION;
+
+    if (etatSysteme != ATTENTE && !transitionConfirmation)
+    {
+        return;
+    }
+
+    typeSaisie = type;
+    positionChiffre = 0;
+    chiffreActuel = 0;
+    etatSysteme = SAISIE_CODE;
+
+    effacerAfficheur();
+    afficherUnChiffre(chiffreActuel, positionChiffre);
+
+    if (type == PROGRAMMATION_PREMIER_CODE)
+    {
+        Serial.println("PREMIERE SAISIE DU CODE");
+    }
+    else if (type == PROGRAMMATION_CONFIRMATION)
+    {
+        Serial.println("CONFIRMATION DU CODE");
+    }
+    else if (type == OUVERTURE_COFFRE)
+    {
+        Serial.println("SAISIE DU CODE POUR OUVRIR");
+    }
+}
+
+void incrementerChiffre()
+{
+    if (etatSysteme != SAISIE_CODE)
+    {
+        return;
+    }
+
+    chiffreActuel = (chiffreActuel + 1) % 10;
+    afficherUnChiffre(chiffreActuel, positionChiffre);
+}
+
+void confirmerChiffre()
+{
+    if (etatSysteme != SAISIE_CODE)
+    {
+        return;
+    }
+
+    if (typeSaisie == PROGRAMMATION_PREMIER_CODE)
+    {
+        codeTemporaire[positionChiffre] = chiffreActuel;
+    }
+    else if (typeSaisie == PROGRAMMATION_CONFIRMATION)
+    {
+        codeConfirmation[positionChiffre] = chiffreActuel;
+    }
+    else if (typeSaisie == OUVERTURE_COFFRE)
+    {
+        codeSaisi[positionChiffre] = chiffreActuel;
+    }
+
+    positionChiffre++;
+
+    if (positionChiffre >= 4)
+    {
+        terminerSaisie();
+        return;
+    }
+
+    chiffreActuel = 0;
+    afficherUnChiffre(chiffreActuel, positionChiffre);
+}
+
+// Vérifie les quatre chiffres saisis et déclenche l'action correspondante.
+void terminerSaisie()
+{
+    effacerAfficheur();
+
+    if (typeSaisie == PROGRAMMATION_PREMIER_CODE)
+    {
+        demarrerSaisie(PROGRAMMATION_CONFIRMATION);
+        return;
+    }
+
+    if (typeSaisie == PROGRAMMATION_CONFIRMATION)
+    {
+        bool identiques = true;
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (codeTemporaire[i] != codeConfirmation[i])
+            {
+                identiques = false;
+                break;
+            }
+        }
+
+        typeSaisie = AUCUNE_SAISIE;
+        etatSysteme = ATTENTE;
+
+        if (identiques)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                codeEnregistre[i] = codeTemporaire[i];
+            }
+
+            codeProgramme = true;
+            demarrerClignotement(0, 255, 0, PROGRAMMATION_REUSSIE);
+        }
+        else
+        {
+            demarrerClignotement(255, 0, 0, RECOMMENCER_PROGRAMMATION);
+        }
+
+        return;
+    }
+
+    if (typeSaisie == OUVERTURE_COFFRE)
+    {
+        bool codeValide = true;
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (codeSaisi[i] != codeEnregistre[i])
+            {
+                codeValide = false;
+                break;
+            }
+        }
+
+        typeSaisie = AUCUNE_SAISIE;
+        etatSysteme = ATTENTE;
+
+        if (codeValide)
+        {
+            ouvrirCoffre();
+        }
+        else
+        {
+            demarrerClignotement(255, 0, 0, OUVERTURE_REFUSEE);
+        }
+    }
+}
+
+// Démarre un clignotement non bloquant avec millis().
+void demarrerClignotement(uint8_t r, uint8_t g, uint8_t b, ActionClignotement action)
+{
+    couleurClignotementR = r;
+    couleurClignotementG = g;
+    couleurClignotementB = b;
+    nombreTransitions = 0;
+    dernierClignotement = millis();
+    couleurAllumee = false;
+    actionApresClignotement = action;
+    etatSysteme = CLIGNOTEMENT;
+
+    afficherCouleur(0, 0, 0);
+}
+
+// Gère le clignotement sans utiliser delay().
+void gererClignotement()
+{
+    if (etatSysteme != CLIGNOTEMENT)
+    {
+        return;
+    }
+
+    if (millis() - dernierClignotement < DUREE_CLIGNOTEMENT)
+    {
+        return;
+    }
+
+    dernierClignotement = millis();
+    couleurAllumee = !couleurAllumee;
+
+    if (couleurAllumee)
+    {
+        afficherCouleur(couleurClignotementR, couleurClignotementG, couleurClignotementB);
+    }
+    else
+    {
+        afficherCouleur(0, 0, 0);
+    }
+
+    nombreTransitions++;
+    if (nombreTransitions >= 6)
+    {
+        terminerClignotement();
+    }
+}
+
+void terminerClignotement()
+{
+    ActionClignotement action = actionApresClignotement;
+    actionApresClignotement = AUCUNE_ACTION;
+    etatSysteme = ATTENTE;
+
+    if (action == PROGRAMMATION_REUSSIE)
+    {
+        afficherCouleur(0, 255, 0);
+        coffreOuvert = true;
+        journaliserEvenement("CHANGEMENT_CODE");
+        Serial.println("PROGRAMMATION REUSSIE !");
+    }
+    else if (action == RECOMMENCER_PROGRAMMATION)
+    {
+        afficherCouleur(255, 80, 0);
+        programmerNouveauCode();
+    }
+    else if (action == OUVERTURE_REFUSEE)
+    {
+        afficherCouleur(255, 0, 0);
+        coffreOuvert = false;
+        effacerAfficheur();
+        Serial.println("Le coffre reste ferme.");
+    }
+}
+
+// Déverrouille le coffre et journalise l'ouverture.
+void ouvrirCoffre()
+{
+    if (coffreOuvert || !codeProgramme)
+    {
+        return;
+    }
+
+    servo.attach(SERVO_PIN, 500, 2400);
+    servo.write(0);
+    servoEnMouvement = true;
+    debutMouvementServo = millis();
+
+    afficherCouleur(0, 255, 0);
+    effacerAfficheur();
+    coffreOuvert = true;
+
+    Serial.println("COFFRE OUVERT !");
+    journaliserEvenement("OUVERTURE");
+}
+
+// Verrouille le coffre et journalise la fermeture.
 void fermerCoffre()
 {
-    // Vérifier que le coffre est ouvert
-    // et qu'un code a été programmé
-
     if (!codeProgramme || !coffreOuvert)
     {
         return;
     }
 
-    Serial.println("==============================");
-    Serial.println("FERMETURE DU COFFRE");
-    Serial.println("==============================");
-
-    // Faire tourner le servo à 180 degrés
     servo.attach(SERVO_PIN, 500, 2400);
     servo.write(180);
+    servoEnMouvement = true;
+    debutMouvementServo = millis();
 
-    delay(DUREE_SERVO);
-
-    servo.detach();
-
-    // Matrice rouge
     afficherCouleur(255, 0, 0);
-
-    // Effacer l'afficheur
-    afficheur.clear();
-
-    // Mettre à jour l'état du coffre
+    effacerAfficheur();
     coffreOuvert = false;
 
-    Serial.println("Coffre ferme !");
-    Serial.println("Servo : 180 degres");
-    Serial.println("Matrice : rouge");
-    Serial.println("Afficheur : vide");
-
-    Serial.println("==============================");
+    Serial.println("COFFRE FERME !");
+    journaliserEvenement("FERMETURE");
 }
 
-// ==========================================
-// PROGRAMMATION COMPLÈTE DU CODE
-// ==========================================
+// Arrête le servomoteur après la durée prévue.
+void gererServo()
+{
+    if (servoEnMouvement && millis() - debutMouvementServo >= DUREE_SERVO)
+    {
+        servo.detach();
+        servoEnMouvement = false;
+        Serial.println("Mouvement du servo termine.");
+    }
+}
 
 void programmerNouveauCode()
 {
-    int nouveauCode[4] = {0, 0, 0, 0};
-
-    bool programmationTerminee = false;
-
-    while (!programmationTerminee)
+    if (!coffreOuvert)
     {
-        // Matrice orange
-        afficherCouleur(255, 80, 0);
-
-        // Première saisie
-        changerCode(nouveauCode);
-
-        // Garder la matrice orange pendant la confirmation
-        afficherCouleur(255, 80, 0);
-
-        // Deuxième saisie et comparaison
-        bool verdict = confirmerCode(nouveauCode);
-
-        if (verdict)
-        {
-            // Enregistrer le nouveau code
-            for (int i = 0; i < 4; i++)
-            {
-                codeEnregistre[i] = nouveauCode[i];
-            }
-
-            codeProgramme = true;
-
-            Serial.println("==============================");
-            Serial.println("PROGRAMMATION REUSSIE");
-            Serial.println("==============================");
-
-            // Trois clignotements verts
-            clignoterCouleur(0, 255, 0);
-
-            // Coffre toujours ouvert
-            afficherCouleur(0, 255, 0);
-
-            programmationTerminee = true;
-        }
-        else
-        {
-            Serial.println("==============================");
-            Serial.println("ERREUR DE CONFIRMATION");
-            Serial.println("RECOMMENCER LA SAISIE");
-            Serial.println("==============================");
-
-            // Trois clignotements rouges
-            clignoterCouleur(255, 0, 0);
-
-            // La matrice repasse en orange
-            // au début de la prochaine tentative
-        }
+        Serial.println("Impossible de programmer : coffre ferme.");
+        return;
     }
+
+    for (int i = 0; i < 4; i++)
+    {
+        codeTemporaire[i] = 0;
+        codeConfirmation[i] = 0;
+    }
+
+    afficherCouleur(255, 80, 0);
+    demarrerSaisie(PROGRAMMATION_PREMIER_CODE);
 }
 
-// ==========================================
-// GESTION DU BOUTON A
-// ==========================================
 void gererBoutonA()
 {
-    bool lecture = digitalRead(BUTTON_A);
-
-    if (lecture != dernierEtatA)
+    if (!appuiA)
     {
-        dernierChangementA = millis();
+        return;
     }
 
-    if (millis() - dernierChangementA >= DEBOUNCE_DELAY)
+    appuiA = false;
+
+    if (etatSysteme == SAISIE_CODE)
     {
-        if (lecture != etatStableA)
+        incrementerChiffre();
+        return;
+    }
+
+    if (etatSysteme == ATTENTE)
+    {
+        if (coffreOuvert && codeProgramme)
         {
-            etatStableA = lecture;
-
-            // Bouton A enfoncé
-            if (etatStableA == LOW)
-            {
-                Serial.println("Bouton A enfonce");
-
-                // Fermer uniquement si un code existe
-                // et si le coffre est ouvert
-
-                if (codeProgramme && coffreOuvert)
-                {
-                    fermerCoffre();
-                }
-                else if (!codeProgramme)
-                {
-                    Serial.println("Aucun code programme !");
-                    Serial.println("Impossible de fermer le coffre.");
-                }
-                else
-                {
-                    Serial.println("Le coffre est deja ferme.");
-                }
-            }
+            fermerCoffre();
+        }
+        else if (!coffreOuvert && codeProgramme)
+        {
+            demarrerSaisie(OUVERTURE_COFFRE);
+        }
+        else if (!codeProgramme)
+        {
+            Serial.println("Aucun code programme !");
         }
     }
-
-    dernierEtatA = lecture;
 }
-// ==========================================
-// GESTION DU BOUTON B
-// ==========================================
+
 void gererBoutonB()
 {
-    bool lecture = digitalRead(BUTTON_B);
-
-    if (lecture != dernierEtatB)
+    if (!appuiB)
     {
-        dernierChangementB = millis();
+        return;
     }
 
-    if (millis() - dernierChangementB >= DEBOUNCE_DELAY)
+    appuiB = false;
+
+    if (etatSysteme == SAISIE_CODE)
     {
-        if (lecture != etatStableB)
+        confirmerChiffre();
+    }
+}
+
+// Lit les boutons, applique l'anti-rebond et détecte l'appui long.
+void lireBoutons()
+{
+    unsigned long maintenant = millis();
+
+    bool nouvelleLectureA = digitalRead(BUTTON_A);
+    if (nouvelleLectureA != lectureA)
+    {
+        lectureA = nouvelleLectureA;
+        dernierChangementA = maintenant;
+    }
+
+    if (maintenant - dernierChangementA >= DEBOUNCE_DELAY)
+    {
+        if (lectureA != etatStableA)
         {
-            etatStableB = lecture;
-
-            // Bouton enfoncé
-            if (etatStableB == LOW)
+            etatStableA = lectureA;
+            if (etatStableA == LOW)
             {
-                tempsDebutAppui = millis();
-
-                appuiLongDeclenche = false;
-
-                Serial.println("Bouton B enfonce");
-            }
-
-            // Bouton relâché
-            else
-            {
-                if (!appuiLongDeclenche)
-                {
-                    Serial.println("Appui court sur B");
-                }
-
-                Serial.println("Bouton B relache");
+                appuiA = true;
             }
         }
     }
 
-    dernierEtatB = lecture;
+    bool nouvelleLectureB = digitalRead(BUTTON_B);
+    if (nouvelleLectureB != lectureB)
+    {
+        lectureB = nouvelleLectureB;
+        dernierChangementB = maintenant;
+    }
 
-    // ==========================================
-    // DÉTECTION APPUI LONG
-    // ==========================================
+    if (maintenant - dernierChangementB >= DEBOUNCE_DELAY)
+    {
+        if (lectureB != etatStableB)
+        {
+            etatStableB = lectureB;
 
+            if (etatStableB == LOW)
+            {
+                tempsDebutAppuiB = maintenant;
+                appuiLongDeclenche = false;
+            }
+            else
+            {
+                unsigned long dureeAppui = maintenant - tempsDebutAppuiB;
+                if (!appuiLongDeclenche &&
+                    dureeAppui < DUREE_APPUI_LONG &&
+                    etatSysteme == SAISIE_CODE)
+                {
+                    appuiB = true;
+                }
+            }
+        }
+    }
+
+    // L'appui long est détecté sans attendre que le bouton soit relâché.
     if (etatStableB == LOW && !appuiLongDeclenche)
     {
-        if (millis() - tempsDebutAppui >= DUREE_APPUI_LONG)
+        if (maintenant - tempsDebutAppuiB >= DUREE_APPUI_LONG)
         {
             appuiLongDeclenche = true;
 
-            Serial.println("==============================");
-            Serial.println("APPUI LONG DETECTE !");
-            Serial.println("==============================");
-
-            // Programmer uniquement si le coffre est ouvert
-            // et qu'aucune programmation n'est en cours
-            if (coffreOuvert)
+            if (etatSysteme == ATTENTE && coffreOuvert)
             {
                 programmerNouveauCode();
             }
-
-            // Réinitialiser l'état de lecture après la saisie
-            dernierEtatB = digitalRead(BUTTON_B);
-            etatStableB = dernierEtatB;
-            dernierChangementB = millis();
+            else if (!coffreOuvert)
+            {
+                Serial.println("Reprogrammation impossible : coffre ferme.");
+            }
         }
     }
 }
@@ -593,62 +685,38 @@ void setup()
 {
     Serial.begin(115200);
 
-    Serial.println();
-    Serial.println("==============================");
-    Serial.println(" COFFRE-FORT CONNECTE");
-    Serial.println(" DEMARRAGE");
-    Serial.println("==============================");
-
-    // Configuration des boutons
     pinMode(BUTTON_A, INPUT_PULLUP);
     pinMode(BUTTON_B, INPUT_PULLUP);
 
-    // Initialisation matrice
     matrix.begin();
     matrix.setBrightness(30);
     matrix.clear();
+    matrix.show();
 
-    // Initialisation afficheur
     afficheur.setBrightness(7, true);
     afficheur.clear();
-
-    // Test afficheur
     afficheur.showNumberDec(8888, true);
 
-    Serial.println("Test afficheur : 8888");
-
-    // Servo à 0 degré
     servo.setPeriodHertz(50);
     servo.attach(SERVO_PIN, 500, 2400);
     servo.write(0);
-
-    delay(1000);
-
-    servo.detach();
-
-    // Matrice verte
-    afficherCouleur(0, 255, 0);
+    debutMouvementServo = millis();
+    servoEnMouvement = true;
 
     codeProgramme = false;
     coffreOuvert = true;
+    afficherCouleur(0, 255, 0);
 
-    Serial.println("Coffre ouvert");
-    Serial.println("Servo : 0 degres");
-    Serial.println("Matrice : verte");
-    Serial.println("Aucun code programme");
+    lectureA = digitalRead(BUTTON_A);
+    etatStableA = lectureA;
+    lectureB = digitalRead(BUTTON_B);
+    etatStableB = lectureB;
 
-    // Connexion Wi-Fi
+    dernierChangementA = millis();
+    dernierChangementB = millis();
+
     connecterWiFi();
-
-    // Synchronisation de l'heure
-    synchroniserHeure();
-
-    // Effacer le test 8888
-    afficheur.clear();
-
-    Serial.println("==============================");
-    Serial.println("INITIALISATION TERMINEE");
-    Serial.println("==============================");
+    Serial.println("Initialisation terminee.");
 }
 
 // ==========================================
@@ -657,6 +725,11 @@ void setup()
 
 void loop()
 {
-    gererBoutonB();
+    lireBoutons();
     gererBoutonA();
+    gererBoutonB();
+    gererClignotement();
+    gererServo();
+    gererWiFiEtHeure();
+
 }

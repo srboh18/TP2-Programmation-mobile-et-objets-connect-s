@@ -1,37 +1,102 @@
 
-This directory is intended for project header files.
+# TP2 – Coffre-fort intelligent connecté
 
-A header file is a file containing C declarations and macro definitions
-to be shared between several project source files. You request the use of a
-header file in your project source file (C, C++, etc) located in `src` folder
-by including it, with the C preprocessing directive `#include'.
+## Présentation du projet
 
-```src/main.c
+Ce projet consiste à concevoir un coffre-fort intelligent connecté à l'aide d'un microcontrôleur ESP32.
 
-#include "header.h"
+Le coffre utilise un système de verrouillage électronique avec un code de sécurité à quatre chiffres. Un servomoteur permet de verrouiller et de déverrouiller le coffre, tandis qu'une matrice DEL indique son état.
 
-int main (void)
-{
- ...
-}
-```
+Le système communique également avec Firebase afin d'enregistrer les événements du coffre dans une base de données Cloud Firestore.
 
-Including a header file produces the same results as copying the header file
-into each source file that needs it. Such copying would be time-consuming
-and error-prone. With a header file, the related declarations appear
-in only one place. If they need to be changed, they can be changed in one
-place, and programs that include the header file will automatically use the
-new version when next recompiled. The header file eliminates the labor of
-finding and changing all the copies as well as the risk that a failure to
-find one copy will result in inconsistencies within a program.
+## Fonctionnalités
 
-In C, the convention is to give header files names that end with `.h'.
+- Programmation d'un code de sécurité à quatre chiffres.
+- Confirmation du code lors de sa programmation.
+- Vérification du code avant l'ouverture.
+- Verrouillage et déverrouillage avec un servomoteur.
+- Affichage de l'état du coffre avec une matrice DEL WS2812B.
+- Affichage des chiffres avec un écran TM1637.
+- Détection des appuis courts et longs sur les boutons.
+- Connexion Wi-Fi avec l'ESP32.
+- Synchronisation de l'heure avec un serveur NTP.
+- Authentification anonyme avec Firebase Authentication.
+- Enregistrement des événements dans Cloud Firestore.
 
-Read more about using header files in official GCC documentation:
+## Matériel et branchements
 
-* Include Syntax
-* Include Operation
-* Once-Only Headers
-* Computed Includes
+| Composant | Broche ESP32 | Fonction |
+|---|---|---|
+| Bouton A | GPIO 16 | Saisie et incrémentation des chiffres |
+| Bouton B | GPIO 17 | Confirmation et programmation |
+| Écran TM1637 CLK | GPIO 18 | Signal d'horloge |
+| Écran TM1637 DIO | GPIO 19 | Transmission des données |
+| Matrice WS2812B DIN | GPIO 13 | Commande des DEL |
+| Servomoteur | GPIO 25 | Verrouillage du coffre |
 
-https://gcc.gnu.org/onlinedocs/cpp/Header-Files.html
+Les boutons utilisent la configuration `INPUT_PULLUP`.
+
+## Bibliothèques nécessaires
+
+| Bibliothèque | Utilisation |
+|---|---|
+| TM1637 | Contrôle de l'écran numérique |
+| Adafruit NeoPixel | Contrôle de la matrice DEL WS2812B |
+| ESP32Servo | Contrôle du servomoteur |
+| Firebase ESP Client | Authentification et communication avec Firebase |
+
+Les dépendances sont déclarées dans le fichier `platformio.ini`.
+
+## Intégration Firebase
+
+Le projet utilise deux services Firebase :
+
+- **Firebase Authentication** : authentification anonyme de l'ESP32.
+- **Cloud Firestore** : enregistrement des événements du coffre.
+
+Les événements enregistrés dans la collection `evenements` sont :
+
+| Événement | Description |
+|---|---|
+| `OUVERTURE` | Ouverture du coffre |
+| `FERMETURE` | Fermeture du coffre |
+| `CHANGEMENT_CODE` | Modification du code de sécurité |
+
+Chaque événement contient les champs suivants :
+
+- `type` : type de l'événement.
+- `horodatage` : date et heure de l'événement.
+- `coffre` : identifiant du coffre.
+
+Le code de sécurité n'est jamais transmis à Firebase.
+
+## Installation et configuration
+
+1. Cloner le dépôt GitHub.
+2. Ouvrir le projet dans Visual Studio Code avec PlatformIO.
+3. Installer les dépendances déclarées dans `platformio.ini`.
+4. Créer le fichier `secrets.h` contenant les informations de connexion Wi-Fi et Firebase.
+5. Configurer Firebase Authentication avec l'authentification anonyme.
+6. Configurer les règles de sécurité de Cloud Firestore.
+7. Connecter les composants selon le tableau des branchements.
+8. Compiler et téléverser le programme sur l'ESP32.
+
+**Important :** le fichier `secrets.h` est exclu du dépôt Git afin de protéger les informations confidentielles.
+
+## Démonstration vidéo
+
+[Lien vers la démonstration vidéo](INSERER_LE_LIEN_ICI)
+
+## Technologies utilisées
+
+- C++
+- ESP32
+- Arduino Framework
+- PlatformIO
+- Firebase Authentication
+- Cloud Firestore
+- NTP
+
+---
+
+Projet réalisé dans le cadre du cours **TP2 – Programmation mobile et objets connectés**.
