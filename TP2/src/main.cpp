@@ -169,24 +169,13 @@ void initialiserFirebase()
 // Enregistre un événement dans Firestore à l'aide de FirebaseJson et createDocument.
 void journaliserEvenement(const char *type)
 {
-    if (!firebaseInitialise || !firebaseInscriptionReussie ||
-        !Firebase.ready() || !heureSynchronisee)
-    {
-        Serial.println("Evenement non enregistre : Firebase ou heure indisponible.");
-        return;
-    }
-
     time_t maintenant = time(nullptr);
-
-    if (maintenant < 100000)
-    {
-        Serial.println("Evenement non enregistre : heure invalide.");
-        return;
-    }
 
     struct tm heureUTC;
     gmtime_r(&maintenant, &heureUTC);
 
+
+    // Src horodotage : https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/system_time.html
     char horodatage[25];
     strftime(horodatage, sizeof(horodatage), "%Y-%m-%dT%H:%M:%SZ", &heureUTC);
 
@@ -195,7 +184,6 @@ void journaliserEvenement(const char *type)
     document.set("fields/horodatage/timestampValue", horodatage);
     document.set("fields/coffre/stringValue", ID_COFFRE);
 
-    // Un identifiant unique évite de remplacer un événement déjà enregistré.
     numeroEvenement++;
 
     String cheminDocument = "evenements/";
@@ -206,6 +194,8 @@ void journaliserEvenement(const char *type)
     Serial.print("Envoi Firestore : ");
     Serial.println(type);
 
+
+    // If pour vérifier si success du fireStore
     if (Firebase.Firestore.createDocument(
             &fbdo,
             PROJECT_ID,
@@ -247,8 +237,6 @@ void gererWiFiEtHeure()
             {
                 heureSynchronisee = true;
                 Serial.println("Heure synchronisee !");
-                Serial.print("Date et heure : ");
-                Serial.println(&timeInfo, "%Y-%m-%d %H:%M:%S");
             }
         }
     }
@@ -268,6 +256,7 @@ void demarrerSaisie(TypeSaisie type)
         etatSysteme == SAISIE_CODE &&
         typeSaisie == PROGRAMMATION_PREMIER_CODE &&
         type == PROGRAMMATION_CONFIRMATION;
+
 
     if (etatSysteme != ATTENTE && !transitionConfirmation)
     {
@@ -346,6 +335,7 @@ void terminerSaisie()
 
     if (typeSaisie == PROGRAMMATION_PREMIER_CODE)
     {
+        // On démare une saisie d'un code
         demarrerSaisie(PROGRAMMATION_CONFIRMATION);
         return;
     }
@@ -460,6 +450,9 @@ void gererClignotement()
 
 void terminerClignotement()
 {
+
+    // Ici selon l'état du clignotement on affiche une couleur 
+
     ActionClignotement action = actionApresClignotement;
     actionApresClignotement = AUCUNE_ACTION;
     etatSysteme = ATTENTE;
@@ -658,7 +651,7 @@ void lireBoutons()
         }
     }
 
-    // L'appui long est détecté sans attendre que le bouton soit relâché.
+    // L'appui long est détecté ici pour changer le code ou le programmer si aucun.
     if (etatStableB == LOW && !appuiLongDeclenche)
     {
         if (maintenant - tempsDebutAppuiB >= DUREE_APPUI_LONG)
