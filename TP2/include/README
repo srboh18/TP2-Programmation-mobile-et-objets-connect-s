@@ -81,11 +81,13 @@ Le code de sécurité n'est jamais transmis à Firebase.
 7. Connecter les composants selon le tableau des branchements.
 8. Compiler et téléverser le programme sur l'ESP32.
 
-**Important :** le fichier `secrets.h` est exclu du dépôt Git afin de protéger les informations confidentielles.
+## Lien du dépôt git
+https://github.com/srboh18/TP2-Programmation-mobile-et-objets-connect-s
 
 ## Démonstration vidéo
 
-[Lien vers la démonstration vidéo](INSERER_LE_LIEN_ICI)
+[Lien vers la démonstration vidéo]
+https://www.youtube.com/watch?v=CUmBMdMJ_sw
 
 ## Technologies utilisées
 
