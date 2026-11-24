@@ -1,1 +1,104 @@
-# TP2-Programmation-mobile-et-objets-connect-s
+
+# TP2 – Coffre-fort intelligent connecté
+
+## Présentation du projet
+
+Ce projet consiste à concevoir un coffre-fort intelligent connecté à l'aide d'un microcontrôleur ESP32.
+
+Le coffre utilise un système de verrouillage électronique avec un code de sécurité à quatre chiffres. Un servomoteur permet de verrouiller et de déverrouiller le coffre, tandis qu'une matrice DEL indique son état.
+
+Le système communique également avec Firebase afin d'enregistrer les événements du coffre dans une base de données Cloud Firestore.
+
+## Fonctionnalités
+
+- Programmation d'un code de sécurité à quatre chiffres.
+- Confirmation du code lors de sa programmation.
+- Vérification du code avant l'ouverture.
+- Verrouillage et déverrouillage avec un servomoteur.
+- Affichage de l'état du coffre avec une matrice DEL WS2812B.
+- Affichage des chiffres avec un écran TM1637.
+- Détection des appuis courts et longs sur les boutons.
+- Connexion Wi-Fi avec l'ESP32.
+- Synchronisation de l'heure avec un serveur NTP.
+- Authentification anonyme avec Firebase Authentication.
+- Enregistrement des événements dans Cloud Firestore.
+
+## Matériel et branchements
+
+| Composant | Broche ESP32 | Fonction |
+|---|---|---|
+| Bouton A | GPIO 16 | Saisie et incrémentation des chiffres |
+| Bouton B | GPIO 17 | Confirmation et programmation |
+| Écran TM1637 CLK | GPIO 18 | Signal d'horloge |
+| Écran TM1637 DIO | GPIO 19 | Transmission des données |
+| Matrice WS2812B DIN | GPIO 13 | Commande des DEL |
+| Servomoteur | GPIO 25 | Verrouillage du coffre |
+
+Les boutons utilisent la configuration `INPUT_PULLUP`.
+
+## Bibliothèques nécessaires
+
+| Bibliothèque | Utilisation |
+|---|---|
+| TM1637 | Contrôle de l'écran numérique |
+| Adafruit NeoPixel | Contrôle de la matrice DEL WS2812B |
+| ESP32Servo | Contrôle du servomoteur |
+| Firebase ESP Client | Authentification et communication avec Firebase |
+
+Les dépendances sont déclarées dans le fichier `platformio.ini`.
+
+## Intégration Firebase
+
+Le projet utilise deux services Firebase :
+
+- **Firebase Authentication** : authentification anonyme de l'ESP32.
+- **Cloud Firestore** : enregistrement des événements du coffre.
+
+Les événements enregistrés dans la collection `evenements` sont :
+
+| Événement | Description |
+|---|---|
+| `OUVERTURE` | Ouverture du coffre |
+| `FERMETURE` | Fermeture du coffre |
+| `CHANGEMENT_CODE` | Modification du code de sécurité |
+
+Chaque événement contient les champs suivants :
+
+- `type` : type de l'événement.
+- `horodatage` : date et heure de l'événement.
+- `coffre` : identifiant du coffre.
+
+Le code de sécurité n'est jamais transmis à Firebase.
+
+## Installation et configuration
+
+1. Cloner le dépôt GitHub.
+2. Ouvrir le projet dans Visual Studio Code avec PlatformIO.
+3. Installer les dépendances déclarées dans `platformio.ini`.
+4. Créer le fichier `secrets.h` contenant les informations de connexion Wi-Fi et Firebase.
+5. Configurer Firebase Authentication avec l'authentification anonyme.
+6. Configurer les règles de sécurité de Cloud Firestore.
+7. Connecter les composants selon le tableau des branchements.
+8. Compiler et téléverser le programme sur l'ESP32.
+
+## Lien du dépôt git
+https://github.com/srboh18/TP2-Programmation-mobile-et-objets-connect-s
+
+## Démonstration vidéo
+
+[Lien vers la démonstration vidéo]
+https://www.youtube.com/watch?v=CUmBMdMJ_sw
+
+## Technologies utilisées
+
+- C++
+- ESP32
+- Arduino Framework
+- PlatformIO
+- Firebase Authentication
+- Cloud Firestore
+- NTP
+
+---
+
+Projet réalisé dans le cadre du cours **TP2 – Programmation mobile et objets connectés**.
